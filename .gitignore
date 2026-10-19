@@ -1,0 +1,15 @@
+# Secrets et configuration locale
+.env
+data/dev_secret.key
+
+# Base de données et artefacts générés
+data/*.db*
+app/ml/artifacts/*.joblib
+app/ml/artifacts/*.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+*.egg-info/

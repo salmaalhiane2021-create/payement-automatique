@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NexPay AI — Espace client</title>
+  <link rel="stylesheet" href="assets/styles.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- ================================================================== -->
+    <!-- Barre latérale                                                      -->
+    <!-- ================================================================== -->
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">N</span>
+        <div>
+          <strong>NexPay <span class="accent">AI</span></strong>
+          <small>Prototype sécurisé</small>
+        </div>
+      </div>
+
+      <nav class="nav" id="nav">
+        <button data-view="dashboard" class="is-active"><span class="icon">◎</span> Tableau de bord</button>
+        <button data-view="transactions"><span class="icon">≡</span> Transactions</button>
+        <button data-view="payment"><span class="icon">⚡</span> Paiement sécurisé</button>
+        <button data-view="security">
+          <span class="icon">🛡</span> Sécurité &amp; IA
+          <span class="pill" id="nav-alert-count" hidden>0</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-user">
+        <strong id="user-name">—</strong>
+        <small id="user-email">—</small>
+        <button class="btn btn-ghost btn-sm btn-block" id="logout">Se déconnecter</button>
+      </div>
+    </aside>
+
+    <!-- ================================================================== -->
+    <!-- Contenu                                                             -->
+    <!-- ================================================================== -->
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1 id="view-title">Tableau de bord</h1>
+          <div class="subtitle" id="view-subtitle">Vue d'ensemble de vos finances</div>
+        </div>
+        <div class="topbar-actions">
+          <div class="chip-balance">Solde <strong id="top-balance">—</strong></div>
+          <button class="bell" id="bell" title="Alertes de sécurité">
+            🔔<span class="count" id="bell-count" hidden>0</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- ------------------------------ Vue 1 : tableau de bord ------- -->
+      <section class="view" id="view-dashboard">
+        <div class="grid grid-4 mb-16">
+          <div class="kpi-card">
+            <div class="kpi"><span class="kpi-label">Compte courant</span>
+              <span class="kpi-value" id="kpi-balance">—</span>
+              <span class="kpi-sub" id="kpi-savings">Épargne : —</span></div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi"><span class="kpi-label">Dépenses du mois</span>
+              <span class="kpi-value" id="kpi-spending">—</span>
+              <span class="kpi-sub" id="kpi-spending-sub">—</span></div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi"><span class="kpi-label">Revenus du mois</span>
+              <span class="kpi-value" id="kpi-income">—</span>
+              <span class="kpi-sub" id="kpi-net">—</span></div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi"><span class="kpi-label">Abonnements</span>
+              <span class="kpi-value" id="kpi-subscriptions">—</span>
+              <span class="kpi-sub">prélèvements récurrents détectés</span></div>
+          </div>
+        </div>
+
+        <div class="grid grid-2-1">
+          <div class="card">
+            <div class="card-head">
+              <div><h3>Dépenses par catégorie</h3><small>30 derniers jours</small></div>
+              <span class="badge badge-info">répartition</span>
+            </div>
+            <div id="chart-categories"><div class="skeleton" style="height:150px"></div></div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><div><h3>Dernières alertes</h3><small>sécurité en temps réel</small></div>
+              <span class="badge badge-violet" id="alerts-badge">0 non lue</span>
+            </div>
+            <div id="dashboard-alerts"><div class="skeleton"></div><div class="skeleton"></div></div>
+          </div>
+        </div>
+
+        <div class="grid grid-2 mb-16">
+          <div class="card">
+            <div class="card-head"><div><h3>Activité des 7 derniers jours</h3><small>débits quotidiens</small></div></div>
+            <div id="chart-daily"></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><div><h3>Évolution du solde</h3><small>30 derniers jours</small></div></div>
+            <div id="chart-balance"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div><h3>Dernières opérations</h3><small>mouvements réellement exécutés</small></div>
+            <button class="btn btn-ghost btn-sm" data-goto="transactions">Tout voir</button>
+          </div>
+          <div class="table-scroll"><table class="table" id="dashboard-transactions"></table></div>
+        </div>
+      </section>
+
+      <!-- ------------------------------ Vue 2 : transactions ---------- -->
+      <section class="view" id="view-transactions" hidden>
+        <div class="card">
+          <div class="filters">
+            <label class="field mb-0"><span>Recherche</span>
+              <input type="search" id="filter-search" placeholder="Marchand, ville, libellé…" /></label>
+            <label class="field mb-0"><span>Catégorie</span>
+              <select id="filter-category"><option value="">Toutes</option></select></label>
+            <label class="field mb-0"><span>Période</span>
+              <select id="filter-days">
+                <option value="30">30 derniers jours</option>
+                <option value="90" selected>3 derniers mois</option>
+                <option value="180">6 derniers mois</option>
+                <option value="">Tout l'historique</option>
+              </select></label>
+            <div class="flex gap-8" style="align-items:end">
+              <label class="field mb-0" style="display:flex;gap:8px;align-items:center">
+                <input type="checkbox" id="filter-flagged" style="width:auto" />
+                <span style="margin:0">Suspectes uniquement</span>
+              </label>
+              <button class="btn btn-primary" id="apply-filters">Filtrer</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div><h3>Historique des opérations</h3><small id="transactions-count">—</small></div>
+            <span class="badge badge-neutral" id="transactions-total">—</span>
+          </div>
+          <div class="table-scroll"><table class="table" id="transactions-table"></table></div>
+          <div class="center mt-16">
+            <button class="btn btn-ghost" id="transactions-more" hidden>Charger la suite</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ------------------------------ Vue 3 : paiement -------------- -->
+      <section class="view" id="view-payment" hidden>
+        <div class="alert alert-info">
+          <strong>Simulation uniquement.</strong> Aucune donnée de carte n'est demandée et aucun prélèvement réel
+          n'est effectué. Le moteur applique les mêmes règles qu'en production (authentification dynamique et score de risque).
+        </div>
+
+        <div class="grid grid-1-2">
+          <!-- Formulaire -->
+          <div class="card">
+            <div class="card-head"><div><h3>Nouveau paiement</h3><small>décrivez l'opération à tester</small></div></div>
+            <form id="payment-form">
+              <label class="field"><span>Bénéficiaire / marchand</span>
+                <input type="text" id="pay-merchant" value="Fnac" maxlength="120" required /></label>
+
+              <div class="field-row">
+                <label class="field"><span>Montant (€)</span>
+                  <input type="number" id="pay-amount" value="89.90" min="0.5" step="0.01" required /></label>
+                <label class="field"><span>Catégorie</span>
+                  <select id="pay-category"></select></label>
+              </div>
+
+              <div class="field-row">
+                <label class="field"><span>Ville</span>
+                  <select id="pay-city"></select></label>
+                <label class="field"><span>Canal</span>
+                  <select id="pay-channel">
+                    <option value="en_ligne">Paiement en ligne</option>
+                    <option value="carte">Carte au terminal</option>
+                    <option value="virement">Virement</option>
+                    <option value="atm">Retrait DAB</option>
+                    <option value="prelevement">Prélèvement</option>
+                  </select></label>
+              </div>
+
+              <label class="field"><span>Appareil utilisé</span>
+                <select id="pay-device"></select></label>
+
+              <label class="field"><span>Heure de l'opération (démonstration)</span>
+                <select id="pay-hour">
+                  <option value="">Heure réelle</option>
+                </select></label>
+
+              <button type="submit" class="btn btn-primary btn-block" id="pay-submit">Analyser le risque</button>
+            </form>
+          </div>
+
+          <!-- Résultat de l'analyse -->
+          <div class="card">
+            <div class="card-head">
+              <div><h3>Analyse et validation</h3><small>authentification dynamique à 60 secondes</small></div>
+              <span class="badge badge-neutral" id="pay-stage">en attente</span>
+            </div>
+            <div id="payment-result">
+              <div class="empty">
+                Renseignez une opération puis lancez l'analyse :<br />
+                score de risque détaillé, décision du moteur et code à usage unique.
+              </div>
+              <h4 class="mt-16">Scénarios de démonstration</h4>
+              <div class="scenario-list" id="scenario-list"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ------------------------------ Vue 4 : sécurité & IA --------- -->
+      <section class="view" id="view-security" hidden>
+        <div class="grid grid-2 mb-16">
+          <!-- Profil comportemental -->
+          <div class="card">
+            <div class="card-head"><div><h3>Profil comportemental</h3>
+              <small id="profile-updated">construit par l'IA à partir de votre historique</small></div></div>
+            <div id="profile-metrics" class="metric-grid mb-16"></div>
+            <h4>Rythme horaire de vos paiements</h4>
+            <div id="profile-hours"></div>
+            <h4 class="mt-16">Ce que l'IA observe</h4>
+            <ul class="list muted" id="profile-insights"></ul>
+          </div>
+
+          <!-- Décisions & anomalies -->
+          <div class="card">
+            <div class="card-head"><div><h3>Anomalies détectées</h3>
+              <small>Isolation Forest + règles métier</small></div>
+              <span class="badge badge-danger">surveillance</span></div>
+            <div id="anomalies-list"></div>
+          </div>
+        </div>
+
+        <div class="grid grid-2 mb-16">
+          <!-- Alertes -->
+          <div class="card">
+            <div class="card-head">
+              <div><h3>Fil des alertes</h3><small>actualisation automatique toutes les 4 secondes</small></div>
+              <button class="btn btn-ghost btn-sm" id="read-all">Tout marquer comme lu</button>
+            </div>
+            <div id="alerts-list" style="max-height:430px;overflow:auto"></div>
+          </div>
+
+          <!-- Recommandations -->
+          <div class="card">
+            <div class="card-head"><div><h3>Recommandations personnalisées</h3>
+              <small>sécurité, épargne et budget</small></div></div>
+            <div id="recommendations"></div>
+          </div>
+        </div>
+
+        <div class="grid grid-2 mb-16">
+          <!-- Modèle -->
+          <div class="card">
+            <div class="card-head">
+              <div><h3>Modèle de détection</h3><small>fiche technique et performance</small></div>
+              <button class="btn btn-ghost btn-sm" id="retrain">Réentraîner</button>
+            </div>
+            <div id="model-card"><div class="skeleton"></div><div class="skeleton"></div></div>
+          </div>
+
+          <!-- Appareils et journal -->
+          <div class="card">
+            <div class="card-head"><div><h3>Appareils de confiance</h3><small>matériel autorisé à payer</small></div></div>
+            <div id="devices-list"></div>
+            <h4 class="mt-16">Journal d'audit</h4>
+            <div id="audit-list" style="max-height:220px;overflow:auto"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast-stack" id="toasts"></div>
+
+  <script src="assets/api.js"></script>
+  <script src="assets/charts.js"></script>
+  <script src="assets/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NexPay AI — Connexion sécurisée</title>
+  <meta name="description" content="Prototype de paiement électronique sécurisé et d'analyse financière par intelligence artificielle." />
+  <link rel="stylesheet" href="assets/styles.css" />
+</head>
+<body class="auth-page">
+  <div class="auth-layout">
+    <!-- ------------------------------------------------------------------ -->
+    <!-- Colonne de présentation                                             -->
+    <!-- ------------------------------------------------------------------ -->
+    <section class="auth-hero">
+      <div class="brand">
+        <span class="brand-mark">N</span>
+        <div>
+          <strong>NexPay <span class="accent">AI</span></strong>
+          <small>Paiement sécurisé &amp; analyse financière</small>
+        </div>
+      </div>
+
+      <h1>Vos paiements protégés<br />par l'intelligence artificielle</h1>
+      <p class="hero-text">
+        Chaque opération est analysée avant validation : score de risque en temps réel,
+        code à usage unique de 60 secondes et détection d'anomalies par apprentissage
+        automatique.
+      </p>
+
+      <ul class="hero-list">
+        <li><span class="dot"></span><div><strong>Authentification dynamique</strong><small>Code à 6 chiffres, usage unique, valable 60 secondes</small></div></li>
+        <li><span class="dot"></span><div><strong>Score de risque 0-100</strong><small>Montant, heure, lieu, appareil, fréquence d'achat</small></div></li>
+        <li><span class="dot"></span><div><strong>Détection d'anomalies</strong><small>Isolation Forest entraîné sur votre historique</small></div></li>
+        <li><span class="dot"></span><div><strong>Conseils personnalisés</strong><small>Sécurité et épargne adaptées à vos habitudes</small></div></li>
+      </ul>
+
+      <div class="notice">
+        <strong>Prototype de démonstration.</strong> Aucune donnée bancaire réelle n'est
+        utilisée et aucun paiement n'est réellement exécuté. Les comptes et les
+        transactions sont générés automatiquement.
+      </div>
+    </section>
+
+    <!-- ------------------------------------------------------------------ -->
+    <!-- Colonne formulaire                                                  -->
+    <!-- ------------------------------------------------------------------ -->
+    <section class="auth-panel">
+      <div class="panel-card">
+        <!-- Onglets : connexion / inscription -->
+        <div class="tabs" role="tablist">
+          <button class="tab is-active" id="tab-login" role="tab" aria-selected="true">Connexion</button>
+          <button class="tab" id="tab-register" role="tab" aria-selected="false">Créer un compte</button>
+        </div>
+
+        <!-- ------------------------------- Connexion ---------------------- -->
+        <form id="form-login" class="form" novalidate>
+          <h2>Content de vous revoir</h2>
+          <p class="muted">Accédez à votre espace bancaire sécurisé.</p>
+
+          <label class="field">
+            <span>Adresse e-mail</span>
+            <input type="email" id="login-email" name="email" autocomplete="username"
+                   placeholder="prenom.nom@exemple.fr" required />
+          </label>
+
+          <label class="field">
+            <span>Mot de passe</span>
+            <span class="input-with-toggle">
+              <input type="password" id="login-password" name="password" autocomplete="current-password"
+                     placeholder="••••••••" required />
+              <button type="button" class="toggle-visibility" data-target="login-password" aria-label="Afficher le mot de passe">👁</button>
+            </span>
+          </label>
+
+          <div id="login-error" class="alert alert-error" hidden></div>
+
+          <button type="submit" class="btn btn-primary btn-block" id="login-submit">Se connecter</button>
+
+          <button type="button" class="btn btn-ghost btn-block" id="fill-demo">
+            Utiliser le compte de démonstration
+          </button>
+
+          <p class="hint">
+            Identifiants de démonstration : <code>demo@nexpay.fr</code> / <code>Demo1234!</code>
+            — code PIN des paiements sensibles : <code>4321</code>
+          </p>
+        </form>
+
+        <!-- ------------------------------ Inscription --------------------- -->
+        <form id="form-register" class="form" novalidate hidden>
+          <h2>Ouvrir un compte</h2>
+          <p class="muted">Le compte de démonstration est crédité de 1 800 € virtuels.</p>
+
+          <label class="field">
+            <span>Nom complet</span>
+            <input type="text" id="register-name" placeholder="Camille Bernard" required />
+          </label>
+
+          <label class="field">
+            <span>Adresse e-mail</span>
+            <input type="email" id="register-email" placeholder="prenom.nom@exemple.fr" required />
+          </label>
+
+          <div class="field-row">
+            <label class="field">
+              <span>Mot de passe</span>
+              <span class="input-with-toggle">
+                <input type="password" id="register-password" placeholder="8 caractères minimum" required />
+                <button type="button" class="toggle-visibility" data-target="register-password" aria-label="Afficher le mot de passe">👁</button>
+              </span>
+            </label>
+            <label class="field">
+              <span>Code PIN (4-6 chiffres)</span>
+              <input type="text" id="register-pin" inputmode="numeric" maxlength="6" placeholder="1234" required />
+            </label>
+          </div>
+
+          <div class="field-row">
+            <label class="field">
+              <span>Ville</span>
+              <input type="text" id="register-city" placeholder="Paris" />
+            </label>
+            <label class="field">
+              <span>Téléphone</span>
+              <input type="tel" id="register-phone" placeholder="06 12 34 56 78" />
+            </label>
+          </div>
+
+          <div id="register-error" class="alert alert-error" hidden></div>
+          <div id="register-success" class="alert alert-success" hidden></div>
+
+          <button type="submit" class="btn btn-primary btn-block">Créer mon compte</button>
+        </form>
+      </div>
+
+      <p class="legal">
+        NexPay AI — prototype pédagogique. Mots de passe hachés (bcrypt), jetons signés,
+        codes à usage unique vérifiés côté serveur.
+      </p>
+    </section>
+  </div>
+
+  <script src="assets/api.js"></script>
+  <script src="assets/login.js"></script>
+</body>
+</html>

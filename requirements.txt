@@ -1,0 +1,26 @@
+# ---------------------------------------------------------------------------
+# NexPay AI - dépendances Python (prototype MVP)
+# Installation :  .venv\Scripts\python -m pip install -r requirements.txt
+# ---------------------------------------------------------------------------
+
+# --- API / serveur ---------------------------------------------------------
+fastapi>=0.115,<1.0        # framework HTTP + validation automatique
+uvicorn>=0.30              # serveur ASGI (version simple : pas de compilation C)
+
+# --- Persistance -----------------------------------------------------------
+SQLAlchemy>=2.0            # ORM (SQLite en développement)
+pydantic>=2.7              # validation des entrées / sorties
+pydantic-settings>=2.3     # configuration par variables d'environnement
+
+# --- Sécurité --------------------------------------------------------------
+PyJWT>=2.8                 # jetons d'authentification signés (HS256)
+bcrypt>=4.1                # hachage des mots de passe et du code PIN
+
+# --- IA / détection d'anomalies -------------------------------------------
+numpy>=1.26
+scikit-learn>=1.4          # Isolation Forest
+joblib>=1.3                # sérialisation du modèle entraîné
+
+# --- Divers ----------------------------------------------------------------
+tzdata>=2024.1             # fuseaux horaires (obligatoire sous Windows)
+pytest>=8.0                # tests unitaires (facultatif)
