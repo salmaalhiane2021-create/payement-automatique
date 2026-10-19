@@ -1,0 +1,13 @@
+# ---------------------------------------------------------------------------
+# Thème de l'interface Streamlit (démonstration en ligne)
+# ---------------------------------------------------------------------------
+[theme]
+base = "dark"
+primaryColor = "#22d3ee"
+backgroundColor = "#0b1220"
+secondaryBackgroundColor = "#111c33"
+textColor = "#e6eefc"
+font = "sans serif"
+
+[server]
+headless = true

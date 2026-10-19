@@ -21,6 +21,10 @@ numpy>=1.26
 scikit-learn>=1.4          # Isolation Forest
 joblib>=1.3                # sérialisation du modèle entraîné
 
+# --- Interface Streamlit (déploiement en ligne) ----------------------------
+streamlit>=1.40,<2.0       # interface de démonstration Streamlit
+pandas>=2.0                # tableaux et graphiques de l'interface
+
 # --- Divers ----------------------------------------------------------------
 tzdata>=2024.1             # fuseaux horaires (obligatoire sous Windows)
 pytest>=8.0                # tests unitaires (facultatif)

@@ -19,6 +19,7 @@ Prototype MVP d'une application bancaire française qui combine **deux briques**
 ## Sommaire
 
 - [Démarrage en 3 commandes](#démarrage-en-3-commandes)
+- [Interface Streamlit (déploiement en ligne)](#interface-streamlit-déploiement-en-ligne)
 - [Comptes de démonstration](#comptes-de-démonstration)
 - [Scénarios de démonstration](#scénarios-de-démonstration)
 - [Comment fonctionne l'IA](#comment-fonctionne-lia)
@@ -82,6 +83,61 @@ Commandes utiles :
 
 ---
 
+## Interface Streamlit (déploiement en ligne)
+
+En plus de l'interface FastAPI, le projet contient une **interface Streamlit**
+autonome, pensée pour être déployée sur **Streamlit Community Cloud**. Elle
+réutilise exactement les mêmes services métier (moteur de risque, codes à usage
+unique, Isolation Forest, profil comportemental, alertes, recommandations) ;
+la logique du cycle de paiement est partagée dans
+`app/services/payment_flow.py`, donc aucune règle n'est dupliquée.
+
+### Lancer en local
+
+```powershell
+.venv\Scripts\python -m pip install -r requirements.txt
+.venv\Scripts\python -m streamlit run streamlit_app.py
+```
+
+L'interface s'ouvre sur **http://localhost:8501**. La base SQLite et le modèle
+sont créés automatiquement au premier lancement. Les identifiants de
+démonstration sont préremplis sur la page de connexion.
+
+Pour faire tourner les deux interfaces en parallèle, ouvrez deux terminaux :
+`run.py` (port 8000) et `streamlit run streamlit_app.py` (port 8501).
+
+### Déployer sur Streamlit Community Cloud
+
+1. Pousser le projet sur GitHub (branche `main`).
+2. Aller sur <https://share.streamlit.io> → **Create app** →
+   **Deploy a public app from GitHub**.
+3. Renseigner :
+   - **Repository** : `salmaalhiane2021-create/payement-automatique`
+   - **Branch** : `main`
+   - **Main file path** : `streamlit_app.py`
+4. Cliquer sur **Deploy**. Aucun secret n'est requis : la clé de démonstration
+   est générée automatiquement dans `data/` au démarrage.
+
+> **Stockage éphémère.** Le disque de Streamlit Community Cloud est réinitialisé
+> à chaque redémarrage : la base SQLite est recréée avec le jeu de démonstration
+> complet (8 comptes, ~1 950 opérations, 24 fraudes simulées) et le modèle est
+> réentraîné. C'est volontaire pour ce prototype — aucune donnée à conserver.
+
+### Pages disponibles
+
+| Page | Contenu |
+| --- | --- |
+| **Tableau de bord** | soldes, dépenses du mois, catégories, série 7 jours, abonnements, dernières opérations, alertes |
+| **Transactions** | historique filtrable et paginé, statut des opérations bloquées, détail et facteurs de risque |
+| **Paiement sécurisé** | 5 scénarios + paiement libre, score, facteurs, code OTP de 60 s, PIN, annulation |
+| **Sécurité & IA** | profil comportemental, explications d'anomalies, alertes, appareils, journal d'audit, recommandations |
+| **Modèle & données** | fiche du modèle, AUC/précision/rappel, évaluation du moteur complet, réentraînement, statistiques du jeu de données |
+
+L'interface Streamlit est protégée par le même hachage bcrypt et le même
+verrouillage anti-force brute (5 essais / 15 minutes) que l'API.
+
+---
+
 ## Comptes de démonstration
 
 Les 8 comptes générés partagent le même mot de passe et le même code PIN :
@@ -97,8 +153,9 @@ Les 8 comptes générés partagent le même mot de passe et le même code PIN :
 | Inès Rossi (Nice) | `ines@nexpay.fr` | `Demo1234!` | `4321` |
 | Karim Benali (Nantes) | `karim@nexpay.fr` | `Demo1234!` | `4321` |
 
-Le bouton « Essayer le compte de démonstration » sur la page de connexion
-pré-remplit les identifiants.
+Le bouton « Essayer le compte de démonstration » de l'interface FastAPI
+pré-remplit les identifiants ; dans l'interface Streamlit, ils sont préremplis
+par défaut.
 
 ---
 
@@ -227,10 +284,13 @@ transparence). Les seuils sont configurables dans `.env`.
 | Persistance | **SQLAlchemy 2** + SQLite | zéro installation ; bascule PostgreSQL par `DATABASE_URL` |
 | IA | **scikit-learn** (Isolation Forest) | détection non supervisée, adaptée aux fraudes inconnues |
 | Sécurité | bcrypt, PyJWT | hachage lent des secrets, jetons signés HS256 |
-| Interface | HTML/CSS/JS **sans build** | aucune dépendance npm, graphiques SVG dessinés à la main |
+| Interface web | HTML/CSS/JS **sans build** | aucune dépendance npm, graphiques SVG dessinés à la main |
+| Interface Cloud | **Streamlit** (`streamlit_app.py`) | déploiement en un clic sur Streamlit Community Cloud |
 
-Aucune bibliothèque front externe (pas de CDN) : l'application fonctionne
-hors-ligne une fois installée.
+Aucune bibliothèque front externe (pas de CDN) : l'application FastAPI fonctionne
+hors-ligne une fois installée. Les deux interfaces partagent la même logique
+métier (`app/services`, `app/ml`) ; seul le transport diffère : HTTP/JWT pour
+FastAPI, appels Python directs pour Streamlit.
 
 ### Flux d'un paiement
 
@@ -250,9 +310,12 @@ Navigation ──> POST /api/payments/quote ──── analyse risque + IA
 
 ```
 payement automatique/
-├── run.py                     # lancement en une commande
+├── run.py                     # lancement en une commande (FastAPI)
+├── streamlit_app.py           # interface Streamlit (déploiement Cloud)
 ├── requirements.txt
 ├── .env.example               # toutes les variables configurables
+├── .streamlit/
+│   └── config.toml            # thème sombre de l'interface Streamlit
 ├── app/
 │   ├── main.py                # application FastAPI (routeurs, erreurs, statiques)
 │   ├── config.py              # configuration (.env → Settings)
@@ -267,9 +330,10 @@ payement automatique/
 │   │   ├── auth.py            # inscription, connexion, PIN, profil
 │   │   ├── dashboard.py       # tableau de bord (soldes, catégories, séries)
 │   │   ├── transactions.py    # historique filtrable
-│   │   ├── payments.py        # quote / défi OTP / confirmation / scénarios
+│   │   ├── payments.py        # couche HTTP : quote / OTP / confirmation / scénarios
 │   │   └── security_center.py # profil, anomalies, alertes, appareils, modèle
 │   ├── services/
+│   │   ├── payment_flow.py    # cycle de paiement partagé API + Streamlit
 │   │   ├── risk_engine.py     # règles pondérées, step-up, décisions, synthèse
 │   │   ├── otp.py             # cycle de vie du code à usage unique
 │   │   ├── behavior.py        # profil comportemental, abonnements, insights
@@ -390,6 +454,9 @@ Toutes les valeurs sont surchargeables par `.env` (voir `.env.example`) :
   pas de surveillance de dérive en continu.
 - **Jeu de données synthétique** : les métriques illustrent la démarche,
   elles ne préjugent pas des performances sur des données réelles.
+- **Streamlit Community Cloud** : stockage éphémère (base SQLite recréée à
+  chaque redémarrage) ; adapté à la démonstration, pas à une persistance de
+  production.
 - **Mono-processus** : pas de file d'attente ni de limites de débit globales.
 
 ---
