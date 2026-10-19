@@ -310,6 +310,13 @@ def create_user(session: Session, spec: dict, rng: random.Random) -> tuple[User,
         phone=spec["phone"],
         city=spec["city"],
         country=spec["country"],
+        # Préférences régionales du jeu de démonstration (France, français).
+        # Aucune nationalité n'est stockée : ces valeurs ne servent qu'à
+        # l'affichage et restent modifiables par chaque utilisateur.
+        country_code=spec.get("country_code", "FR"),
+        locale=spec.get("locale", "fr-FR"),
+        timezone=spec.get("timezone", "Europe/Paris"),
+        currency=spec.get("currency", "EUR"),
         monthly_income=spec["income"],
         risk_aversion=spec["risk_aversion"],
         created_at=now_utc() - timedelta(days=400),
@@ -823,7 +830,9 @@ def seed_database(session: Session, force: bool = False, verbose: bool = True) -
     # --- Entraînement du modèle d'anomalies ------------------------------
     if verbose:
         print("\n  Entraînement du modèle Isolation Forest…")
-    training_report = train_detector(session)
+    # force=True : une régénération des données doit toujours réentraîner le
+    # modèle (l'intervalle anti-emballement ne s'applique pas au seed).
+    training_report = train_detector(session, force=True)
     if verbose:
         print(f"  → {training_report['status']} : {training_report['message']}")
 

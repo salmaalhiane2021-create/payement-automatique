@@ -5,6 +5,17 @@ Toutes les valeurs sensibles (clé secrète, seuils, base de données) provienne
 de variables d'environnement ou du fichier `.env`. Aucun secret n'est écrit en
 dur dans le code : en développement, si `SECRET_KEY` est absent, une clé est
 générée et stockée dans `data/dev_secret.key` (fichier ignoré par git).
+
+Déploiement
+-----------
+* `HOST` / `PORT` : interface et port d'écoute (mettez `0.0.0.0` derrière un
+  reverse-proxy ou dans un conteneur).
+* `CORS_ORIGINS` : liste d'origines autorisées, séparées par des virgules.
+  Vide en développement => origines locales ; en production, vide signifie
+  « même origine uniquement » et `*` est refusé par `validate_runtime()`.
+* `SECRET_KEY` : obligatoire en production (64 caractères aléatoires minimum
+  recommandés) ; la clé de développement n'est jamais utilisée si
+  `ENVIRONMENT=production`.
 """
 
 from __future__ import annotations
@@ -34,9 +45,11 @@ class Settings(BaseSettings):
 
     # --- Application -------------------------------------------------------
     app_name: str = "NexPay AI"
-    app_version: str = "1.0.0"
+    app_version: str = "1.1.0"
     environment: str = "development"
     app_timezone: str = "Europe/Paris"
+    default_locale: str = "fr-FR"
+    default_currency: str = "EUR"
 
     # --- Sécurité ----------------------------------------------------------
     secret_key: str = ""
@@ -61,10 +74,27 @@ class Settings(BaseSettings):
     # --- Machine learning --------------------------------------------------
     ml_contamination: float = 0.04
     ml_min_samples: int = 120          # en dessous, on n'entraîne pas le modèle
+    # Emplacement des artefacts, partageable entre plusieurs instances :
+    #   file:///chemin/absolu   (défaut : app/ml/artifacts)
+    #   s3://bucket/prefix      (nécessite le paquet optionnel boto3)
+    model_store_uri: str = ""
+    # Délai minimal entre deux réentraînements (anti-emballement).
+    ml_retrain_min_interval_seconds: int = 300
+    # Durée de vie du verrou d'entraînement (libéré automatiquement après).
+    ml_training_lock_ttl_seconds: int = 900
+
+    # --- Devises -----------------------------------------------------------
+    # Conversion désactivée par défaut. Pour l'activer, fournissez une source
+    # fiable de taux (JSON « devise_quote: taux_pour_1_EUR »).
+    # Exemple : FX_RATES_JSON={"USD": 1.08, "GBP": 0.85}
+    fx_rates_json: str = ""
+    fx_rates_source: str = ""          # libellé documentaire de la source des taux
 
     # --- Infrastructure ----------------------------------------------------
+    host: str = "127.0.0.1"
+    port: int = 8000
     database_url: str = ""
-    cors_origins: str = "*"
+    cors_origins: str = ""             # vide : valeurs de dev en développement
 
     # ------------------------------------------------------------------
     # Propriétés calculées
@@ -91,13 +121,62 @@ class Settings(BaseSettings):
         return f"sqlite:///{(DATA_DIR / 'nexpay.db').as_posix()}"
 
     @property
+    def resolved_model_store_uri(self) -> str:
+        """URI du stockage des artefacts du modèle (fichier local par défaut)."""
+        if self.model_store_uri:
+            return self.model_store_uri
+        return f"file://{ARTIFACTS_DIR.as_posix()}"
+
+    @property
     def cors_origin_list(self) -> list[str]:
-        """Liste des origines CORS autorisées."""
-        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+        """
+        Origines CORS autorisées.
+
+        En développement, une liste vide retombe sur les adresses locales
+        usuelles (FastAPI 8000 / Streamlit 8501). En production, une liste vide
+        signifie « même origine uniquement » : aucun CORS permissif par défaut.
+        """
+        configured = [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+        if configured:
+            return configured
+        if self.is_production:
+            return []
+        return [
+            "http://localhost:8000",
+            "http://127.0.0.1:8000",
+            "http://localhost:8501",
+            "http://127.0.0.1:8501",
+        ]
 
     @property
     def is_production(self) -> bool:
         return self.environment.lower() in {"production", "prod"}
+
+    # ------------------------------------------------------------------
+    # Validation d'exécution
+    # ------------------------------------------------------------------
+    def validate_runtime(self) -> None:
+        """
+        Refuse les configurations dangereuses en production.
+
+        Appelée au démarrage du serveur, du bootstrap et de Streamlit :
+        une clé secrète explicite est exigée et le CORS generique est refusé.
+        En développement, aucune contrainte (confort de la démo).
+        """
+        if not self.is_production:
+            return
+
+        if not self.secret_key or len(self.secret_key) < 32:
+            raise RuntimeError(
+                "SECRET_KEY est obligatoire en production (32 caractères minimum). "
+                "Générez-la avec : python -c \"import secrets; print(secrets.token_urlsafe(64))\""
+            )
+        if "*" in self.cors_origin_list:
+            raise RuntimeError(
+                "CORS_ORIGINS ne peut pas contenir « * » en production. "
+                "Indiquez explicitement les origines autorisées, ou laissez vide "
+                "pour n'autoriser que la même origine."
+            )
 
 
 @lru_cache

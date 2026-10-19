@@ -21,19 +21,47 @@ EMAIL_RE = r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$"
 
 
 class RegisterRequest(BaseModel):
-    """Création de compte."""
+    """
+    Création de compte.
+
+    Aucune nationalité n'est demandée ni stockée. Les champs régionaux sont
+    facultatifs : `country_code`, `locale`, `timezone` et `currency` sont
+    validés par le service d'authentification puis utilisés pour l'affichage.
+    """
 
     full_name: str = Field(min_length=3, max_length=120)
     email: str = Field(pattern=EMAIL_RE, max_length=180)
     password: str = Field(min_length=8, max_length=72)
     pin: str = Field(default="1234", min_length=4, max_length=6)
     phone: str = Field(default="", max_length=30)
-    city: str = Field(default="Paris", max_length=80)
+    city: str = Field(default="", max_length=80)
+    country: str = Field(default="", max_length=80)
+    country_code: str = Field(default="", max_length=2)
+    locale: str = Field(default="", max_length=15)
+    timezone: str = Field(default="", max_length=50)
+    currency: str = Field(default="", max_length=3)
 
-    @field_validator("full_name", "city", "phone")
+    @field_validator("full_name", "city", "phone", "country", "country_code", "locale", "timezone", "currency")
     @classmethod
     def _strip(cls, value: str) -> str:
         return (value or "").strip()
+
+
+class UpdateProfileRequest(BaseModel):
+    """Mise à jour des préférences régionales et coordonnées (facultatif)."""
+
+    city: str | None = Field(default=None, max_length=80)
+    country: str | None = Field(default=None, max_length=80)
+    country_code: str | None = Field(default=None, max_length=2)
+    phone: str | None = Field(default=None, max_length=30)
+    locale: str | None = Field(default=None, max_length=15)
+    timezone: str | None = Field(default=None, max_length=50)
+    currency: str | None = Field(default=None, max_length=3)
+
+    @field_validator("city", "phone", "country", "country_code", "locale", "timezone", "currency")
+    @classmethod
+    def _strip(cls, value: str | None) -> str | None:
+        return value.strip() if isinstance(value, str) else value
 
 
 class LoginRequest(BaseModel):
@@ -54,6 +82,10 @@ class UserOut(BaseModel):
     phone: str
     city: str
     country: str
+    country_code: str
+    locale: str
+    timezone: str
+    currency: str
     monthly_income: float
 
 
@@ -85,8 +117,10 @@ class PaymentQuoteRequest(BaseModel):
     merchant: str = Field(min_length=2, max_length=120)
     amount: float = Field(gt=0, le=settings.payment_max_amount)
     category: str = Field(default="Shopping", max_length=40)
-    city: str = Field(default="Paris", max_length=80)
-    country: str = Field(default="France", max_length=80)
+    # Aucune localisation n'est imposée : si la ville est inconnue du
+    # référentiel géographique, le facteur « zone » n'est simplement pas évalué.
+    city: str = Field(default="", max_length=80)
+    country: str = Field(default="", max_length=80)
     channel: Literal["carte", "virement", "atm", "en_ligne", "prelevement"] = "en_ligne"
     device_fingerprint: str | None = Field(default=None, max_length=64)
     device_label: str = Field(default="Appareil actuel", max_length=80)

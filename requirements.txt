@@ -9,8 +9,13 @@ uvicorn>=0.30              # serveur ASGI (version simple : pas de compilation C
 
 # --- Persistance -----------------------------------------------------------
 SQLAlchemy>=2.0            # ORM (SQLite en développement)
+alembic>=1.13              # migrations de schéma versionnées
 pydantic>=2.7              # validation des entrées / sorties
 pydantic-settings>=2.3     # configuration par variables d'environnement
+
+# --- Internationalisation ---------------------------------------------------
+Babel>=2.14                # formats de dates, montants, pays et devises
+phonenumbers>=8.13         # numéros au format international (E.164)
 
 # --- Sécurité --------------------------------------------------------------
 PyJWT>=2.8                 # jetons d'authentification signés (HS256)
@@ -28,3 +33,5 @@ pandas>=2.0                # tableaux et graphiques de l'interface
 # --- Divers ----------------------------------------------------------------
 tzdata>=2024.1             # fuseaux horaires (obligatoire sous Windows)
 pytest>=8.0                # tests unitaires (facultatif)
+# boto3                    # facultatif : stockage des artefacts du modèle sur S3
+#                          # (pip install boto3 puis MODEL_STORE_URI=s3://bucket/prefix)

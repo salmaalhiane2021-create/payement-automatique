@@ -41,13 +41,20 @@ NIGHT_HOURS = {23, 0, 1, 2, 3, 4, 5}
 # ---------------------------------------------------------------------------
 # Utilitaires de date
 # ---------------------------------------------------------------------------
-def to_local(dt: datetime | None) -> datetime:
-    """Convertit un horodatage UTC naïf vers le fuseau local de référence."""
+def to_local(dt: datetime | None, timezone_name: str | None = None) -> datetime:
+    """
+    Convertit un horodatage UTC naïf vers le fuseau local demandé.
+
+    Sans argument, le fuseau de référence de l'application est utilisé
+    (`APP_TIMEZONE`). Les interfaces passent le fuseau de l'utilisateur pour
+    un affichage adapté à son pays.
+    """
+    zone = ZoneInfo(timezone_name) if timezone_name else TZ
     if dt is None:
-        return now_utc().replace(tzinfo=timezone.utc).astimezone(TZ)
+        return now_utc().replace(tzinfo=timezone.utc).astimezone(zone)
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(TZ)
+    return dt.astimezone(zone)
 
 
 def iso(dt: datetime | None) -> str | None:
@@ -103,13 +110,15 @@ def category_breakdown(transactions: list[Transaction], limit: int | None = None
     return rows[:limit] if limit else rows
 
 
-def daily_series(transactions: list[Transaction], days: int = 7) -> list[dict]:
+def daily_series(
+    transactions: list[Transaction], days: int = 7, timezone_name: str | None = None
+) -> list[dict]:
     """Séries quotidiennes débits / crédits sur les `days` derniers jours."""
-    today = to_local(now_utc()).date()
+    today = to_local(now_utc(), timezone_name).date()
     buckets = {(today - timedelta(days=offset)).isoformat(): {"debit": 0.0, "credit": 0.0} for offset in range(days)}
 
     for txn in transactions:
-        key = to_local(txn.ts).date().isoformat()
+        key = to_local(txn.ts, timezone_name).date().isoformat()
         if key in buckets:
             if txn.amount < 0:
                 buckets[key]["debit"] += abs(txn.amount)
@@ -122,11 +131,13 @@ def daily_series(transactions: list[Transaction], days: int = 7) -> list[dict]:
     ]
 
 
-def monthly_totals(transactions: list[Transaction], months: int = MONTHS_WINDOW) -> list[dict]:
+def monthly_totals(
+    transactions: list[Transaction], months: int = MONTHS_WINDOW, timezone_name: str | None = None
+) -> list[dict]:
     """Dépenses / revenus par mois calendaire."""
     buckets: dict[str, dict[str, float]] = defaultdict(lambda: {"spending": 0.0, "income": 0.0})
     for txn in transactions:
-        key = to_local(txn.ts).strftime("%Y-%m")
+        key = to_local(txn.ts, timezone_name).strftime("%Y-%m")
         if txn.amount < 0:
             buckets[key]["spending"] += abs(txn.amount)
         else:
@@ -147,7 +158,7 @@ def monthly_totals(transactions: list[Transaction], months: int = MONTHS_WINDOW)
 NON_SUBSCRIPTION_MERCHANTS = {"Loyer", "Retrait DAB", "Virement salaire ACME"}
 
 
-def detect_subscriptions(transactions: list[Transaction]) -> list[dict]:
+def detect_subscriptions(transactions: list[Transaction], timezone_name: str | None = None) -> list[dict]:
     """
     Repère les prélèvements récurrents.
 
@@ -168,7 +179,7 @@ def detect_subscriptions(transactions: list[Transaction]) -> list[dict]:
         if mean_amount <= 0:
             continue
         spread = statistics.pstdev(amounts) / mean_amount
-        months = {to_local(item.ts).strftime("%Y-%m") for item in items}
+        months = {to_local(item.ts, timezone_name).strftime("%Y-%m") for item in items}
         if spread < 0.15 and len(months) >= 3:
             most_recent = max(items, key=lambda item: item.ts)
             subscriptions.append(
@@ -247,7 +258,9 @@ def build_profile(db: Session, user: User, include_frauds: bool = False) -> dict
         debits = [abs(txn.amount) for txn in transactions]
 
     debits_sorted = sorted(debits)
-    local_dates = [to_local(txn.ts) for txn in transactions]
+    # Toutes les statistiques horaires et calendaires sont calculées dans le
+    # fuseau de l'utilisateur : ses habitudes sont locales, pas serveur.
+    local_dates = [to_local(txn.ts, user.timezone) for txn in transactions]
 
     # --- Distribution horaire et hebdomadaire ---------------------------
     hour_counts = Counter(date.hour for date in local_dates)
@@ -278,7 +291,7 @@ def build_profile(db: Session, user: User, include_frauds: bool = False) -> dict
     )[:8]
 
     period_days = max(1, (local_dates[-1].date() - local_dates[0].date()).days + 1)
-    monthly = monthly_totals(transactions)
+    monthly = monthly_totals(transactions, timezone_name=user.timezone)
     spending_months = [row["spending"] for row in monthly if row["spending"] > 0]
     average_monthly_spending = statistics.fmean(spending_months) if spending_months else 0.0
 
@@ -375,8 +388,13 @@ def _build_insights(profile: dict, user: User) -> list[str]:
 # ---------------------------------------------------------------------------
 # Persistance et cache
 # ---------------------------------------------------------------------------
-def refresh_profile(db: Session, user: User) -> dict:
-    """Recalcule le profil et l'enregistre (appelé après chaque transaction)."""
+def refresh_profile(db: Session, user: User, commit: bool = True) -> dict:
+    """
+    Recalcule le profil et l'enregistre (appelé après chaque transaction).
+
+    `commit=False` permet d'intégrer la mise à jour du profil à une
+    transaction plus large (paiement atomique) : voir `payment_flow.confirm`.
+    """
     profile = build_profile(db, user)
     row = db.scalar(select(BehavioralProfile).where(BehavioralProfile.user_id == user.id))
     if row is None:
@@ -385,7 +403,9 @@ def refresh_profile(db: Session, user: User) -> dict:
     else:
         row.data = profile
         row.updated_at = now_utc()
-    db.commit()
+    db.flush()
+    if commit:
+        db.commit()
     return profile
 
 

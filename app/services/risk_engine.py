@@ -59,7 +59,11 @@ WEIGHTS = {
     "heure_inhabituelle": 10,
     "appareil_inconnu": 18,
     "localisation_inhabituelle": 14,
-    "pays_etranger": 8,
+    # « zone_inhabituelle » : écart par rapport à l'historique **de
+    # l'utilisateur** (zones d'où il a l'habitude d'opérer). Le pays n'est
+    # jamais un motif de suspicion en soi : aucune nationalité n'intervient,
+    # aucune restriction n'est fondée sur l'origine ou le pays de résidence.
+    "zone_inhabituelle": 8,
     "velocite_impossible": 25,
     "velocite_suspecte": 12,
     "frequence_anormale": 15,
@@ -158,7 +162,10 @@ def assess_payment(db: Session, user: User, payment: dict, profile: dict) -> Ris
     longitude. Aucune donnée bancaire sensible n'est manipulée.
     """
     ts = payment.get("ts") or now_utc()
-    local_ts = to_local(ts)
+    # L'heure et le jour sont interprétés dans le fuseau de l'utilisateur :
+    # une opération « normale » pour un client en Asie ne doit pas être jugée
+    # nocturne parce que le serveur est configuré sur un autre fuseau.
+    local_ts = to_local(ts, user.timezone)
     amount = float(payment.get("amount") or 0.0)
     merchant = (payment.get("merchant") or "").strip()
     city = (payment.get("city") or "").strip()
@@ -304,8 +311,17 @@ def assess_payment(db: Session, user: User, payment: dict, profile: dict) -> Ris
         add("localisation_inhabituelle", 8, f"Première opération depuis {city}.", "moyen")
     known_countries = {c.lower() for c in (profile.get("known_countries") or [])}
     if country and country.lower() not in known_countries:
-        step_up_codes.add("pays_etranger")
-        add("pays_etranger", WEIGHTS["pays_etranger"], f"Pays hors de vos zones habituelles ({country}).", "moyen")
+        # Signal strictement comportemental : « zone jamais observée sur **ce**
+        # compte ». Aucune nationalité n'est demandée ni utilisée ; le motif
+        # serait le même pour un client de n'importe quel pays.
+        step_up_codes.add("zone_inhabituelle")
+        add(
+            "zone_inhabituelle",
+            WEIGHTS["zone_inhabituelle"],
+            f"Opération depuis une zone encore jamais observée sur votre compte ({country}) : "
+            "signal fondé sur votre historique, pas sur votre origine.",
+            "moyen",
+        )
 
     # --- 7. Vélocité géographique ---------------------------------------
     if velocity >= geo.IMPOSSIBLE_SPEED_KMH and distance >= 150:
@@ -314,7 +330,7 @@ def assess_payment(db: Session, user: User, payment: dict, profile: dict) -> Ris
             "velocite_impossible",
             WEIGHTS["velocite_impossible"],
             f"Déplacement de {distance:.0f} km ({velocity:.0f} km/h) depuis votre dernière opération de "
-            f"{to_local(previous.ts).strftime('%H:%M')} : physiquement impossible.",
+            f"{to_local(previous.ts, user.timezone).strftime('%H:%M')} : physiquement impossible.",
             "critique",
         )
     elif velocity >= geo.SUSPICIOUS_SPEED_KMH and distance >= 100:
@@ -396,7 +412,7 @@ _LABELS = {
     "heure_inhabituelle": "Heure inhabituelle",
     "appareil_inconnu": "Appareil inconnu",
     "localisation_inhabituelle": "Lieu inhabituel",
-    "pays_etranger": "Pays inhabituel",
+    "zone_inhabituelle": "Zone géographique inhabituelle",
     "velocite_impossible": "Déplacement impossible",
     "velocite_suspecte": "Déplacement très rapide",
     "frequence_anormale": "Rythme d'opérations anormal",
@@ -444,12 +460,12 @@ def statistical_risk(profile: dict, amount: float) -> float:
     return quick_statistical_risk(amount, profile)
 
 
-def preview_features(profile: dict, payment: dict) -> dict:
+def preview_features(profile: dict, payment: dict, timezone_name: str | None = None) -> dict:
     """Variables calculées pour un paiement (utile aux tests et au débogage)."""
     ts = payment.get("ts") or now_utc()
     context = {
         "amount": payment.get("amount"),
-        "hour": to_local(ts).hour,
+        "hour": to_local(ts, timezone_name).hour,
         "device_fingerprint": payment.get("device_fingerprint"),
         "city": payment.get("city"),
         "channel": payment.get("channel"),

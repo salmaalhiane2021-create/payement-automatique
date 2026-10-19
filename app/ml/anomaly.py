@@ -24,9 +24,11 @@ démarrage : le serveur ne réentraîne donc pas à chaque requête.
 
 from __future__ import annotations
 
+import io
+import os
+import socket
 import time
 from collections import deque
-from pathlib import Path
 
 import joblib
 import numpy as np
@@ -35,11 +37,17 @@ from sklearn.preprocessing import StandardScaler
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.config import ARTIFACTS_DIR, settings
+from app.config import settings
 from app.database import now_utc
+from app.ml.artifact_store import (
+    SUPPORTED_ARTIFACT_FORMAT,
+    ArtifactStore,
+    build_store,
+)
 from app.ml.features import (
     FEATURE_LABELS_FR,
     FEATURE_NAMES,
+    FEATURE_VERSION,
     build_features,
     context_from_transaction,
     to_vector,
@@ -48,7 +56,7 @@ from app.models import Transaction, User
 from app.services import geo
 from app.services.behavior import build_profile
 
-MODEL_PATH = ARTIFACTS_DIR / "isolation_forest.joblib"
+MODEL_VERSION = f"isolation-forest-{SUPPORTED_ARTIFACT_FORMAT}.{FEATURE_VERSION}"
 
 # Nombre de points de quantiles empiriques conservés pour la calibration.
 QUANTILE_POINTS = 201
@@ -72,6 +80,9 @@ class AnomalyDetector:
         self.model: IsolationForest | None = None
         self.scaler: StandardScaler | None = None
         self.metadata: dict = {}
+        # Raison du dernier refus de chargement (version incompatible, artefact
+        # illisible…) : affichée dans l'interface « Modèle & données ».
+        self.load_error: str = ""
 
     # -- État ------------------------------------------------------------
     @property
@@ -88,33 +99,64 @@ class AnomalyDetector:
         return self.metadata.get("train_std")
 
     # -- Persistance -----------------------------------------------------
-    def save(self, path: Path = MODEL_PATH) -> None:
-        """Sérialise le modèle entraîné sur le disque."""
-        path.parent.mkdir(parents=True, exist_ok=True)
+    def save(self, store: ArtifactStore | None = None) -> None:
+        """Sérialise le modèle via le stockage configuré (local ou partagé)."""
+        store = store or get_store()
+        buffer = io.BytesIO()
         joblib.dump(
             {
                 "model": self.model,
                 "scaler": self.scaler,
                 "metadata": self.metadata,
             },
-            path,
+            buffer,
         )
+        store.write(buffer.getvalue())
 
-    def load(self, path: Path = MODEL_PATH) -> bool:
-        """Charge le modèle depuis le disque ; False si absent ou incompatible."""
-        if not path.exists():
+    def load(self, store: ArtifactStore | None = None) -> bool:
+        """
+        Charge le modèle depuis le stockage ; False si absent ou incompatible.
+
+        Vérifications explicites (évite d'appliquer un modèle entraîné sur un
+        schéma de variables différent) :
+
+        * format du bundle (`artifact_format`) ;
+        * liste et ordre des variables (`feature_names`) ;
+        * **version des variables** (`feature_version`) ;
+        * version du modèle (`model_version`).
+        """
+        store = store or get_store()
+        self.load_error = ""
+        payload = store.read()
+        if payload is None:
+            self.load_error = f"aucun artefact dans {store.describe()}"
             return False
         try:
-            bundle = joblib.load(path)
-            if bundle.get("metadata", {}).get("feature_names") != FEATURE_NAMES:
-                # Le schéma des variables a changé : il faut réentraîner.
-                return False
-            self.model = bundle["model"]
-            self.scaler = bundle["scaler"]
-            self.metadata = bundle["metadata"]
-            return True
-        except Exception:  # pragma: no cover - artefact corrompu
+            bundle = joblib.load(io.BytesIO(payload))
+        except Exception as error:  # pragma: no cover - artefact corrompu
+            self.load_error = f"artefact illisible ({type(error).__name__})"
             return False
+
+        metadata = (bundle or {}).get("metadata") or {}
+        checks = (
+            (metadata.get("artifact_format") == SUPPORTED_ARTIFACT_FORMAT,
+             f"format d'artefact {metadata.get('artifact_format')} ≠ {SUPPORTED_ARTIFACT_FORMAT}"),
+            (metadata.get("feature_names") == FEATURE_NAMES,
+             "schéma de variables différent"),
+            (metadata.get("feature_version") == FEATURE_VERSION,
+             f"version de variables {metadata.get('feature_version')} ≠ {FEATURE_VERSION}"),
+            (metadata.get("model_version") == MODEL_VERSION,
+             f"version de modèle {metadata.get('model_version')} ≠ {MODEL_VERSION}"),
+        )
+        for valid, reason in checks:
+            if not valid:
+                self.load_error = f"{reason} : réentraînement nécessaire"
+                return False
+
+        self.model = bundle["model"]
+        self.scaler = bundle["scaler"]
+        self.metadata = metadata
+        return True
 
     # -- Entraînement ----------------------------------------------------
     def fit(self, matrix: np.ndarray, contamination: float) -> dict:
@@ -139,6 +181,12 @@ class AnomalyDetector:
         # puissance pour concentrer le score sur la vraie queue de distribution.
         raw = -self.model.decision_function(scaled)
         self.metadata = {
+            # --- Identité et compatibilité de l'artefact -------------------
+            "artifact_format": SUPPORTED_ARTIFACT_FORMAT,
+            "feature_version": FEATURE_VERSION,
+            "model_version": MODEL_VERSION,
+            "app_version": settings.app_version,
+            # --- Schéma et échantillon d'entraînement ----------------------
             "feature_names": FEATURE_NAMES,
             "n_samples": int(matrix.shape[0]),
             "n_features": int(matrix.shape[1]),
@@ -192,7 +240,9 @@ class AnomalyDetector:
         if not transactions:
             return 0
 
-        profiles = {user.id: build_profile(db, user) for user in db.scalars(select(User)).all()}
+        users = list(db.scalars(select(User)).all())
+        profiles = {user.id: build_profile(db, user) for user in users}
+        timezones = {user.id: user.timezone for user in users}
         by_user: dict[int, list[Transaction]] = {}
         for txn in transactions:
             by_user.setdefault(txn.user_id, []).append(txn)
@@ -200,12 +250,15 @@ class AnomalyDetector:
         vectors: list[list[float]] = []
         for user_id_key, items in by_user.items():
             profile = profiles.get(user_id_key) or {}
+            timezone_name = timezones.get(user_id_key)
             previous = None
             window: deque = deque()
             for txn in items:
                 while window and (txn.ts - window[0]).total_seconds() > 3600:
                     window.popleft()
-                context = context_from_transaction(txn, previous, txn_count_1h=len(window))
+                context = context_from_transaction(
+                    txn, previous, txn_count_1h=len(window), timezone_name=timezone_name
+                )
                 vectors.append(to_vector(build_features(context, profile)))
                 window.append(txn.ts)
                 previous = txn
@@ -222,13 +275,27 @@ class AnomalyDetector:
 # ---------------------------------------------------------------------------
 detector = AnomalyDetector()
 _loaded = False
+_store: ArtifactStore | None = None
+
+
+def get_store() -> ArtifactStore:
+    """Stockage d'artefacts configuré (mémoïsé pour la durée du processus)."""
+    global _store
+    if _store is None:
+        _store = build_store()
+    return _store
 
 
 def get_detector() -> AnomalyDetector:
-    """Charge le modèle depuis le disque au premier appel."""
+    """
+    Charge le modèle depuis le stockage configuré au premier appel.
+
+    Le chargement est unique par processus : aucune lecture disque ou S3 à
+    chaque paiement. `reload_detector()` force une relecture après réentraînement.
+    """
     global _loaded
     if not _loaded:
-        detector.load()
+        detector.load(get_store())
         _loaded = True
     return detector
 
@@ -278,7 +345,9 @@ def build_training_matrix(db: Session, include_frauds: bool = False) -> tuple[np
         for txn in items:
             while window and (txn.ts - window[0]).total_seconds() > 3600:
                 window.popleft()
-            context = context_from_transaction(txn, previous, txn_count_1h=len(window))
+            context = context_from_transaction(
+                txn, previous, txn_count_1h=len(window), timezone_name=user.timezone
+            )
             rows.append(to_vector(build_features(context, profile)))
             emitters.append(f"{user.id}:{txn.id}")
             window.append(txn.ts)
@@ -287,44 +356,92 @@ def build_training_matrix(db: Session, include_frauds: bool = False) -> tuple[np
     return np.asarray(rows, dtype=float), emitters
 
 
-def train_detector(db: Session, contamination: float | None = None) -> dict:
+def train_detector(db: Session, contamination: float | None = None, force: bool = False) -> dict:
     """
-    Entraîne (ou réentraîne) le modèle et le sauvegarde.
+    Entraîne (ou réentraîne) le modèle et le sauvegarde dans le stockage configuré.
+
+    Garde-fous anti-emballement (multi-instances, redémarrages en boucle) :
+
+    * **verrou d'entraînement** partagé : si une autre instance entraîne déjà,
+      on renvoie ``status="busy"`` sans rien faire (le verrou abandonné expire
+      après ``ML_TRAINING_LOCK_TTL_SECONDS``) ;
+    * **intervalle minimal** entre deux entraînements
+      (``ML_RETRAIN_MIN_INTERVAL_SECONDS``) : un redémarrage rapproché ne
+      relance pas l'entraînement ; `force=True` l'ignore explicitement (utilisé
+      quand l'artefact est absent ou d'une version incompatible).
 
     Retourne un rapport : nombre d'exemples, durée, métriques d'évaluation.
     """
     started = time.perf_counter()
     contamination = float(contamination if contamination is not None else settings.ml_contamination)
-    matrix, _ = build_training_matrix(db)
+    store = get_store()
+    holder = f"{socket.gethostname()}:{os.getpid()}"
 
-    if matrix.shape[0] < settings.ml_min_samples:
+    if not store.acquire_training_lock(settings.ml_training_lock_ttl_seconds, holder):
         return {
-            "status": "insufficient_data",
+            "status": "busy",
             "message": (
-                f"Données insuffisantes pour l'entraînement : {matrix.shape[0]} opérations "
-                f"(minimum {settings.ml_min_samples})."
+                "Un entraînement est déjà en cours sur ce stockage partagé. "
+                "Réessayez dans quelques minutes."
             ),
-            "n_samples": int(matrix.shape[0]),
+            "n_samples": 0,
             "metrics": {},
+            "store": store.describe(),
             "duration_seconds": round(time.perf_counter() - started, 3),
         }
 
-    detector.fit(matrix, contamination)
-    detector.save()
-    reload_detector()
-    detector.rescore_transactions(db)
+    try:
+        if not force:
+            age = store.last_write_age_seconds()
+            if age is not None and age < settings.ml_retrain_min_interval_seconds:
+                return {
+                    "status": "skipped",
+                    "message": (
+                        f"Modèle déjà entraîné il y a {int(age)} s : réentraînement ignoré "
+                        f"(intervalle minimal {settings.ml_retrain_min_interval_seconds} s)."
+                    ),
+                    "n_samples": 0,
+                    "metrics": {},
+                    "store": store.describe(),
+                    "duration_seconds": round(time.perf_counter() - started, 3),
+                }
 
-    metrics = evaluate(db)
-    return {
-        "status": "ok",
-        "message": (
-            f"Modèle entraîné sur {matrix.shape[0]} opérations normales "
-            f"({matrix.shape[1]} variables) et appliqué à l'historique."
-        ),
-        "n_samples": int(matrix.shape[0]),
-        "metrics": metrics,
-        "duration_seconds": round(time.perf_counter() - started, 3),
-    }
+        matrix, _ = build_training_matrix(db)
+
+        if matrix.shape[0] < settings.ml_min_samples:
+            return {
+                "status": "insufficient_data",
+                "message": (
+                    f"Données insuffisantes pour l'entraînement : {matrix.shape[0]} opérations "
+                    f"(minimum {settings.ml_min_samples})."
+                ),
+                "n_samples": int(matrix.shape[0]),
+                "metrics": {},
+                "store": store.describe(),
+                "duration_seconds": round(time.perf_counter() - started, 3),
+            }
+
+        detector.fit(matrix, contamination)
+        detector.save(store)
+        reload_detector()
+        detector.rescore_transactions(db)
+
+        metrics = evaluate(db)
+        return {
+            "status": "ok",
+            "message": (
+                f"Modèle entraîné sur {matrix.shape[0]} opérations normales "
+                f"({matrix.shape[1]} variables) et appliqué à l'historique."
+            ),
+            "n_samples": int(matrix.shape[0]),
+            "metrics": metrics,
+            "store": store.describe(),
+            "feature_version": FEATURE_VERSION,
+            "model_version": MODEL_VERSION,
+            "duration_seconds": round(time.perf_counter() - started, 3),
+        }
+    finally:
+        store.release_training_lock()
 
 
 # ---------------------------------------------------------------------------
@@ -512,6 +629,13 @@ def model_card(db: Session) -> dict:
         "features": [f"{name} — {FEATURE_LABELS_FR.get(name, '')}" for name in FEATURE_NAMES],
         "metrics": metrics,
         "last_retrain_seconds": metadata.get("fit_seconds"),
+        # --- Traçabilité de l'artefact (stockage et versions) --------------
+        "store": get_store().describe(),
+        "feature_version": FEATURE_VERSION,
+        "model_version": metadata.get("model_version", MODEL_VERSION),
+        "artifact_format": metadata.get("artifact_format"),
+        "load_error": current.load_error,
+        "retrain_min_interval_seconds": settings.ml_retrain_min_interval_seconds,
     }
 
 

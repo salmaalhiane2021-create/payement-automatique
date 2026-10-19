@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.deps import client_ip, get_current_user
+from app.deps import client_ip, get_current_user, request_language
 from app.models import User
 from app.schemas import (
     ChallengeStatusOut,
@@ -72,6 +72,7 @@ def quote_payment(
         user,
         payload.model_dump(),
         ip_address=client_ip(request),
+        lang=request_language(request, user),
     )
     return PaymentQuoteResponse(**result)
 
@@ -150,6 +151,7 @@ def confirm_payment(
         code=payload.code,
         pin=payload.pin,
         ip_address=client_ip(request),
+        lang=request_language(request, user),
     )
     if result["status"] == "error":
         raise HTTPException(

@@ -54,9 +54,16 @@ class User(Base):
     # lorsque le moteur de risque exige une authentification renforcée.
     pin_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-    phone: Mapped[str] = mapped_column(String(30), default="")
+    # --- Identité et coordonnées (international) --------------------------
+    # Aucune nationalité n'est demandée : seules des informations de contact et
+    # de préférences régionales, modifiables par l'utilisateur, sont stockées.
+    phone: Mapped[str] = mapped_column(String(30), default="")          # format E.164 recommandé
     city: Mapped[str] = mapped_column(String(80), default="")
-    country: Mapped[str] = mapped_column(String(80), default="France")
+    country: Mapped[str] = mapped_column(String(80), default="")        # libellé libre affiché
+    country_code: Mapped[str] = mapped_column(String(2), default="FR")  # ISO 3166-1 alpha-2
+    locale: Mapped[str] = mapped_column(String(15), default="fr-FR")    # BCP 47 (fr-FR, en-US…)
+    timezone: Mapped[str] = mapped_column(String(50), default="Europe/Paris")  # IANA
+    currency: Mapped[str] = mapped_column(String(3), default="EUR")     # ISO 4217
     monthly_income: Mapped[float] = mapped_column(Float, default=0.0)
     risk_aversion: Mapped[float] = mapped_column(Float, default=0.5)  # 0 = téméraire, 1 = prudent
 

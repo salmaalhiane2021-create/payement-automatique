@@ -10,11 +10,27 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.i18n import DEFAULT_LANGUAGE, language_from_locale, normalize_language
 from app.models import User
 from app.security import decode_access_token
 
 # auto_error=False : on renvoie nous-mêmes une erreur en français
 bearer_scheme = HTTPBearer(auto_error=False)
+
+
+def request_language(request: Request, user: User | None = None) -> str:
+    """
+    Langue à utiliser pour la réponse : en-tête `Accept-Language`, puis
+    préférence enregistrée par l'utilisateur, sinon français (défaut).
+    """
+    header = request.headers.get("accept-language", "")
+    if header:
+        first = header.split(",")[0].strip()
+        if first:
+            return normalize_language(first)
+    if user is not None:
+        return language_from_locale(user.locale)
+    return DEFAULT_LANGUAGE
 
 
 def client_ip(request: Request) -> str:

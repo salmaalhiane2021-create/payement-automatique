@@ -33,6 +33,11 @@ from datetime import datetime
 from app.services import geo
 from app.services.behavior import NIGHT_HOURS, to_local
 
+# Version du schéma de variables. À incrémenter dès qu'une variable est
+# ajoutée, renommée ou change de sens : les artefacts entraînés avec une autre
+# version sont refusés au chargement (réentraînement nécessaire).
+FEATURE_VERSION = 2
+
 FEATURE_NAMES: list[str] = [
     "amount_log",
     "amount_zscore",
@@ -163,12 +168,16 @@ def context_from_transaction(
     transaction,
     previous=None,
     txn_count_1h: int = 0,
+    timezone_name: str | None = None,
 ) -> dict:
     """
     Construit le contexte d'une transaction enregistrée (utilisé pour
     l'entraînement et pour le recalcul des scores de l'historique).
+
+    `timezone_name` permet d'utiliser le fuseau de l'utilisateur propriétaire
+    de l'historique (les habitudes horaires sont locales, pas serveur).
     """
-    local_ts = to_local(transaction.ts)
+    local_ts = to_local(transaction.ts, timezone_name)
     velocity = 0.0
     if previous is not None:
         velocity, _ = geo.travel_velocity_kmh(
@@ -199,6 +208,6 @@ def human_amount_ratio(amount: float, profile: dict) -> float | None:
     return amount / median
 
 
-def local_hour_of(ts: datetime) -> int:
-    """Heure locale d'un horodatage UTC naïf."""
-    return to_local(ts).hour
+def local_hour_of(ts: datetime, timezone_name: str | None = None) -> int:
+    """Heure locale d'un horodatage UTC naïf (fuseau utilisateur facultatif)."""
+    return to_local(ts, timezone_name).hour

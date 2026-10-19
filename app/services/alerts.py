@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import now_utc
+from app.i18n import t
 from app.models import Alert, AuditLog
 
 
@@ -54,18 +55,36 @@ def create_alert(
     return alert
 
 
-def alert_for_blocked_payment(db: Session, user_id: int, payment: dict, assessment, commit: bool = True) -> Alert:
+def alert_for_blocked_payment(
+    db: Session,
+    user_id: int,
+    payment: dict,
+    assessment,
+    commit: bool = True,
+    lang: str = "fr",
+) -> Alert:
     """Alerte créée lorsqu'un paiement est refusé par le moteur de risque."""
-    reasons = " · ".join(factor["label"] for factor in assessment.factors[:3]) or "comportement inhabituel"
+    reasons = " · ".join(factor["label"] for factor in assessment.factors[:3]) or t(
+        "alert.blocked.fallback_reason", lang
+    )
+    amount = f"{float(payment.get('amount', 0)):.2f} €"
     return create_alert(
         db,
         user_id=user_id,
         kind="fraude",
         severity=severity_from_score(assessment.score),
-        title=f"Paiement bloqué : {payment.get('merchant')} ({payment.get('amount', 0):.2f} €)",
-        message=(
-            f"Une opération de {float(payment.get('amount', 0)):.2f} € vers « {payment.get('merchant')} » a été refusée. "
-            f"Motifs : {reasons}."
+        title=t(
+            "alert.blocked.title",
+            lang,
+            merchant=payment.get("merchant"),
+            amount=amount,
+        ),
+        message=t(
+            "alert.blocked.message",
+            lang,
+            amount=amount,
+            merchant=payment.get("merchant"),
+            reasons=reasons,
         ),
         details={
             "score_risque": assessment.score,
@@ -86,23 +105,26 @@ def alert_for_high_anomaly(
     anomaly_score: float,
     reasons: list[str],
     commit: bool = True,
+    lang: str = "fr",
 ) -> Alert:
     """Alerte créée lorsqu'une opération exécutée reste très atypique."""
     # Les raisons issues du modèle d'IA (Isolation Forest) sont déjà résumées
     # par le message : on ne garde ici que les motifs lisibles par l'utilisateur.
     rule_reasons = [reason for reason in reasons if not reason.startswith("Comportement atypique détecté")]
-    message = (
-        "Cette opération a été exécutée mais le modèle d'IA l'a jugée inhabituelle pour votre compte. "
-        + (" ".join(rule_reasons[:2]) + " " if rule_reasons else "")
-        + "Vérifiez-la ; si vous ne la reconnaissez pas, signalez-la depuis le centre de sécurité."
-    )
+    suffix = " ".join(rule_reasons[:2]) + " " if rule_reasons else ""
+    amount = f"{abs(float(transaction.amount)):.2f} €"
     return create_alert(
         db,
         user_id=user_id,
         kind="anomalie",
         severity="eleve" if anomaly_score >= 0.75 else "moyen",
-        title=f"Opération atypique : {transaction.merchant} ({abs(transaction.amount):.2f} €)",
-        message=message,
+        title=t(
+            "alert.anomaly.title",
+            lang,
+            merchant=transaction.merchant,
+            amount=amount,
+        ),
+        message=t("alert.anomaly.message", lang, reasons=suffix),
         transaction_id=transaction.id,
         details={"score_ia": round(anomaly_score, 3), "raisons": reasons},
         commit=commit,

@@ -19,7 +19,8 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, select
 
 from app.config import FRONTEND_DIR, settings
-from app.database import SessionLocal, init_db
+from app.database import SessionLocal
+from app.migrations import upgrade_database
 from app.models import Transaction, User
 from app.routers import auth, dashboard, payments, security_center, transactions
 
@@ -31,8 +32,16 @@ logger = logging.getLogger("nexpay")
 # ---------------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    """Prépare la base, le modèle d'IA et nettoie les défis expirés au démarrage."""
-    init_db()
+    """Vérifie la configuration, migre la base, prépare le modèle d'IA."""
+    # Une configuration de production dangereuse (clé secrète absente, CORS
+    # générique) fait échouer le démarrage : mieux vaut refuser que d'exposer.
+    settings.validate_runtime()
+
+    try:
+        migration_report = upgrade_database()
+        logger.info("Schéma à jour : révision %s", migration_report.get("head_revision"))
+    except Exception as error:  # pragma: no cover - le serveur doit démarrer quand même
+        logger.warning("Migrations impossibles : %s", error)
 
     session = SessionLocal()
     try:
@@ -45,9 +54,14 @@ async def lifespan(_: FastAPI):
         detector = get_detector()
         users = int(session.scalar(select(func.count(User.id))) or 0)
         if not detector.available and users > 0:
-            # Premier démarrage : on entraîne le modèle à partir de l'historique
-            train_detector(session)
-            logger.info("Modèle d'anomalies entraîné au démarrage.")
+            # Artefact absent ou version incompatible : le verrou d'entraînement
+            # et l'intervalle minimal évitent tout entraînement concurrent ou
+            # répété entre les instances redémarrées en boucle.
+            result = train_detector(session, force=True)
+            if result.get("status") == "ok":
+                logger.info("Modèle d'anomalies entraîné au démarrage.")
+            else:
+                logger.warning("Entraînement non effectué : %s", result.get("message"))
     except Exception as error:  # pragma: no cover - le serveur doit démarrer quand même
         logger.warning("Initialisation du modèle impossible : %s", error)
     finally:
@@ -70,15 +84,24 @@ app = FastAPI(
 )
 
 # ---------------------------------------------------------------------------
-# CORS (utile si le frontend est servi par un autre port en développement)
+# CORS — jamais permissif par défaut
 # ---------------------------------------------------------------------------
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origin_list,
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# En développement, les adresses locales usuelles (frontend 8000, Streamlit
+# 8501) sont autorisées si CORS_ORIGINS est vide. En production, une liste vide
+# signifie « même origine uniquement » ; « * » est refusé par
+# settings.validate_runtime(). L'application ne pose donc jamais de CORS
+# générique sans configuration explicite.
+if settings.cors_origin_list:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origin_list,
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "Accept-Language"],
+    )
+    logger.info("CORS autorisé pour : %s", ", ".join(settings.cors_origin_list))
+else:
+    logger.info("CORS désactivé (même origine uniquement).")
 
 # ---------------------------------------------------------------------------
 # Routeurs API
@@ -122,8 +145,11 @@ async def not_found_handler(request: Request, _exc) -> JSONResponse:  # pragma: 
 # ---------------------------------------------------------------------------
 @app.get("/api/health", tags=["supervision"])
 def health() -> dict:
-    """État de santé : base de données, modèle d'IA, version."""
-    from app.ml.anomaly import get_detector
+    """État de santé : base de données, modèle d'IA, schéma, version."""
+    from app.database import engine
+    from app.i18n import CATALOGS
+    from app.migrations import current_revision
+    from app.ml.anomaly import get_detector, get_store
 
     session = SessionLocal()
     try:
@@ -138,6 +164,7 @@ def health() -> dict:
         "version": settings.app_version,
         "environment": settings.environment,
         "database": str(settings.resolved_database_url).split("/")[-1],
+        "schema_revision": current_revision(engine),
         "users": users,
         "transactions": transactions,
         "model": {
@@ -145,7 +172,12 @@ def health() -> dict:
             "entraine_le": detector.metadata.get("trained_at"),
             "exemples": detector.metadata.get("n_samples", 0),
             "contamination": detector.metadata.get("contamination", settings.ml_contamination),
+            "version_variables": detector.metadata.get("feature_version"),
+            "version_modele": detector.metadata.get("model_version"),
+            "stockage": get_store().describe(),
+            "erreur_chargement": detector.load_error or None,
         },
+        "languages": sorted(CATALOGS.keys()),
         "otp_ttl_seconds": settings.otp_ttl_seconds,
         "seuils_risque": {"accept_max": settings.risk_accept_max, "verify_max": settings.risk_verify_max},
     }

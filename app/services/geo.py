@@ -85,8 +85,8 @@ def coords_for(city: str, country: str | None = None) -> tuple[float, float] | N
     return entry[0], entry[1]
 
 
-def country_for(city: str, default: str = "France") -> str:
-    """Pays associé à une ville connue."""
+def country_for(city: str, default: str = "") -> str:
+    """Pays associé à une ville connue (chaîne vide si inconnue)."""
     entry = CITY_COORDS.get((city or "").strip())
     return entry[2] if entry else default
 
